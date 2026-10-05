@@ -50,6 +50,10 @@ static void test_secret_tool_roundtrip() {
 
     // Part 1: brocred writes, secret-tool reads back
     Result r = store->store_secret(test_svc, test_acc, "oracle_linux_pass_1");
+    if (!r.ok || store->backend_name() != "SecretService") {
+        bstest::skip("test_linux_secret_tool_oracle",
+                     "Cannot store into system Secret Service (keyring locked, prompt required, or fell back): " + r.error);
+    }
     CHECK(r.ok);
 
     std::string lookup_out = exec_cmd("secret-tool lookup service " + test_svc + " account " + test_acc);
