@@ -39,6 +39,7 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         brocred_test(test_linux_dbus_mock SOURCES linux/test_linux_dbus_mock.cpp LIBS PkgConfig::BROCRED_SDBUS)
         brocred_test(test_crypto_dh SOURCES linux/test_crypto_dh.cpp LIBS OpenSSL::Crypto)
         brocred_test(test_secret_service SOURCES linux/test_secret_service.cpp LIBS PkgConfig::BROCRED_SDBUS OpenSSL::Crypto)
+        brocred_test(test_polkit_agent SOURCES linux/test_polkit_agent.cpp LIBS PkgConfig::BROCRED_SDBUS)
     endif()
     # Tells the feature test what this configuration was built with.
     brocred_test(test_linux_features SOURCES linux/test_linux_features.cpp)

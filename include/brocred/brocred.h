@@ -7,5 +7,7 @@
 #include "brocred/event_queue.h"
 #include "brocred/events.h"
 #include "brocred/features.h"
+#include "brocred/polkit_agent.h"
+#include "brocred/secret_service.h"
 #include "brocred/storage.h"
 #include "brocred/verifier.h"
