@@ -6,5 +6,6 @@
 #include "brocred/credential.h"
 #include "brocred/event_queue.h"
 #include "brocred/events.h"
+#include "brocred/features.h"
 #include "brocred/storage.h"
 #include "brocred/verifier.h"

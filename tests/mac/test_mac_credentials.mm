@@ -5,17 +5,21 @@
 using namespace brocred;
 
 static void test_mac_cred_crud() {
-    bstest::ScopedTestKeychain kc;
+    const std::string test_svc = "brocred_mac_test_svc";
+    const std::string test_acc = "test_user_mac";
+    auto temp_kc = bstest::maybe_temp_keychain();
+    bstest::ScopedKeychainItems items{{test_svc, test_acc}};
 
     auto store = CredentialStore::create();
     REQUIRE(store != nullptr);
     CHECK_EQ(store->backend_name(), std::string("AppleKeychain"));
 
-    std::string test_svc = "brocred_mac_test_svc";
-    std::string test_acc = "test_user_mac";
-
     std::map<std::string, std::string> attrs = {{"os", "darwin"}, {"arch", "arm64"}};
     Result r = store->store_secret(test_svc, test_acc, "mac_secret_key_777", attrs);
+    if (!r.ok && bstest::keychain_unavailable(r.error)) {
+        bstest::skip("test_mac_credentials", "login keychain unavailable in this session: " + r.error +
+                                                   bstest::kLockedKeychainHint);
+    }
     CHECK(r.ok);
 
     auto sec = store->read_secret(test_svc, test_acc);
@@ -27,11 +31,11 @@ static void test_mac_cred_crud() {
     CHECK_EQ(cred->service, test_svc);
     CHECK_EQ(cred->account, test_acc);
     CHECK_EQ(cred->secret, std::string("mac_secret_key_777"));
-    CHECK_EQ(cred->attributes.at("os"), std::string("darwin"));
-    CHECK_EQ(cred->attributes.at("arch"), std::string("arm64"));
+    CHECK(cred->attributes.count("os") == 1 && cred->attributes.at("os") == "darwin");
+    CHECK(cred->attributes.count("arch") == 1 && cred->attributes.at("arch") == "arm64");
 
     auto list = store->list_credentials(test_svc);
-    CHECK_EQ(list.size(), size_t(1));
+    REQUIRE(list.size() == 1);
     CHECK_EQ(list[0].service, test_svc);
     CHECK_EQ(list[0].account, test_acc);
 

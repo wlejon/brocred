@@ -60,7 +60,7 @@ std::string sec_error_message(OSStatus status) {
     CFStringRef errStr = SecCopyErrorMessageString(status, nullptr);
     if (errStr) {
         NSString* ns = (__bridge_transfer NSString*)errStr;
-        return [ns UTF8String];
+        return std::string([ns UTF8String]) + " (OSStatus " + std::to_string(status) + ")";
     }
     return "Keychain error code " + std::to_string(status);
 }

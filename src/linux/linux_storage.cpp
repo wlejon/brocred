@@ -43,7 +43,18 @@ std::string LinuxSecretServiceStore::backend_name() const {
 }
 
 bool LinuxSecretServiceStore::ensure_session(std::string* error) {
-    if (!is_using_secret_service()) return false;
+    if (!is_using_secret_service()) {
+        if (error) {
+#if defined(BROCRED_HAVE_SDBUS)
+            *error = bus_ && bus_->valid()
+                ? "no org.freedesktop.secrets service on the session bus"
+                : "cannot connect to the D-Bus session bus";
+#else
+            *error = linux_dbus::kNoSdBus;
+#endif
+        }
+        return false;
+    }
     if (!session_path_.empty()) return true;
 
     if (!bus_->secret_service_open_session(session_path_, error)) {

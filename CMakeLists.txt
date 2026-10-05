@@ -33,15 +33,49 @@ if(WIN32)
     file(GLOB _win_sources CONFIGURE_DEPENDS src/win/*.cpp)
     list(APPEND BROCRED_SOURCES ${_win_sources})
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # Optional system integrations. AUTO uses them when the development files
+    # are present; ON makes a missing one a configure error; OFF never uses it.
+    # Without sd-bus the store is the file keystore (Secret Service and fprintd
+    # report themselves unavailable); without PAM verify_password() fails with
+    # an explanatory error. brocred::compiled_features() says which were built.
+    set(BROCRED_WITH_SDBUS AUTO CACHE STRING "Secret Service + fprintd over sd-bus (libsystemd): AUTO, ON or OFF")
+    set(BROCRED_WITH_PAM AUTO CACHE STRING "Password verification through PAM: AUTO, ON or OFF")
+    set_property(CACHE BROCRED_WITH_SDBUS PROPERTY STRINGS AUTO ON OFF)
+    set_property(CACHE BROCRED_WITH_PAM PROPERTY STRINGS AUTO ON OFF)
+
     find_package(PkgConfig REQUIRED)
     find_package(Threads REQUIRED)
-    pkg_check_modules(BROCRED_SDBUS REQUIRED IMPORTED_TARGET libsystemd>=246)
-    pkg_check_modules(BROCRED_PAM QUIET IMPORTED_TARGET pam)
 
-    file(GLOB _linux_sources CONFIGURE_DEPENDS
-        src/linux/*.cpp
-        src/linux/dbus/*.cpp)
+    set(BROCRED_HAVE_SDBUS OFF)
+    if(NOT BROCRED_WITH_SDBUS STREQUAL "OFF")
+        if(BROCRED_WITH_SDBUS STREQUAL "ON")
+            pkg_check_modules(BROCRED_SDBUS REQUIRED IMPORTED_TARGET libsystemd>=246)
+        else()
+            pkg_check_modules(BROCRED_SDBUS QUIET IMPORTED_TARGET libsystemd>=246)
+        endif()
+        if(BROCRED_SDBUS_FOUND)
+            set(BROCRED_HAVE_SDBUS ON)
+        endif()
+    endif()
+
+    set(BROCRED_HAVE_PAM OFF)
+    if(NOT BROCRED_WITH_PAM STREQUAL "OFF")
+        find_path(BROCRED_PAM_INCLUDE_DIR security/pam_appl.h)
+        find_library(BROCRED_PAM_LIBRARY pam)
+        if(BROCRED_PAM_INCLUDE_DIR AND BROCRED_PAM_LIBRARY)
+            set(BROCRED_HAVE_PAM ON)
+        elseif(BROCRED_WITH_PAM STREQUAL "ON")
+            message(FATAL_ERROR "BROCRED_WITH_PAM=ON but PAM headers/library were not found (libpam0g-dev / pam-devel)")
+        endif()
+    endif()
+    message(STATUS "brocred: sd-bus (Secret Service, fprintd): ${BROCRED_HAVE_SDBUS}; PAM: ${BROCRED_HAVE_PAM}")
+
+    file(GLOB _linux_sources CONFIGURE_DEPENDS src/linux/*.cpp)
     list(APPEND BROCRED_SOURCES ${_linux_sources})
+    if(BROCRED_HAVE_SDBUS)
+        file(GLOB _dbus_sources CONFIGURE_DEPENDS src/linux/dbus/*.cpp)
+        list(APPEND BROCRED_SOURCES ${_dbus_sources})
+    endif()
 elseif(APPLE)
     enable_language(OBJCXX)
     set(CMAKE_OBJCXX_STANDARD 20)
@@ -71,16 +105,15 @@ if(WIN32)
     target_link_libraries(brocred PRIVATE
         advapi32 winbio windowsapp)
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    target_link_libraries(brocred
-        PUBLIC
-            Threads::Threads
-        PRIVATE
-            PkgConfig::BROCRED_SDBUS)
-    if(BROCRED_PAM_FOUND)
-        target_link_libraries(brocred PRIVATE PkgConfig::BROCRED_PAM)
-    else()
-        find_library(PAM_LIB pam REQUIRED)
-        target_link_libraries(brocred PRIVATE ${PAM_LIB})
+    target_link_libraries(brocred PUBLIC Threads::Threads)
+    if(BROCRED_HAVE_SDBUS)
+        target_link_libraries(brocred PRIVATE PkgConfig::BROCRED_SDBUS)
+        target_compile_definitions(brocred PRIVATE BROCRED_HAVE_SDBUS=1)
+    endif()
+    if(BROCRED_HAVE_PAM)
+        target_include_directories(brocred PRIVATE ${BROCRED_PAM_INCLUDE_DIR})
+        target_link_libraries(brocred PRIVATE ${BROCRED_PAM_LIBRARY})
+        target_compile_definitions(brocred PRIVATE BROCRED_HAVE_PAM=1)
     endif()
 elseif(APPLE)
     target_compile_options(brocred PRIVATE $<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>)

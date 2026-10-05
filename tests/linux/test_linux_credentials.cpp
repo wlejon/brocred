@@ -1,33 +1,55 @@
 #include "check.h"
 #include "brocred/storage.h"
 
+#include <filesystem>
+#include <unistd.h>
+
 using namespace brocred;
 
-struct ScopedLinuxCleanup {
-    std::string service;
-    std::string account;
+// Round-trips through the default store. With a Secret Service daemon that is
+// the user's real keyring, so the item is removed before and after (RAII, so
+// also when a REQUIRE bails out). Without one the default is the file
+// keystore under the user's data directory; the test then points it at a
+// private temporary file instead of creating files in $HOME.
+namespace {
 
-    ScopedLinuxCleanup(std::string s, std::string a) : service(std::move(s)), account(std::move(a)) {
-        cleanup();
+struct TempDir {
+    std::string path;
+    TempDir() {
+        char tmpl[] = "/tmp/brocred_linux_cred_XXXXXX";
+        if (char* d = mkdtemp(tmpl)) path = d;
     }
-    ~ScopedLinuxCleanup() {
-        cleanup();
-    }
-    void cleanup() {
-        auto store = CredentialStore::create();
-        if (store) {
-            store->delete_secret(service, account);
-        }
+    ~TempDir() {
+        std::error_code ec;
+        if (!path.empty()) std::filesystem::remove_all(path, ec);
     }
 };
 
-static void test_linux_cred_crud() {
-    std::string test_svc = "brocred_linux_test_svc";
-    std::string test_acc = "test_user_linux";
-    ScopedLinuxCleanup guard(test_svc, test_acc);
+struct ScopedCleanup {
+    CredentialStore* store;
+    std::string service;
+    std::string account;
+    ScopedCleanup(CredentialStore* s, std::string svc, std::string acc)
+        : store(s), service(std::move(svc)), account(std::move(acc)) {
+        store->delete_secret(service, account);
+    }
+    ~ScopedCleanup() { store->delete_secret(service, account); }
+};
 
-    auto store = CredentialStore::create();
+}  // namespace
+
+static void test_linux_cred_crud() {
+    const std::string test_svc = "brocred_linux_test_svc";
+    const std::string test_acc = "test_user_linux";
+
+    TempDir tmp;
+    REQUIRE(!tmp.path.empty());
+    StorageOptions opts;
+    opts.custom_file_path = tmp.path + "/credentials.store";
+    auto store = CredentialStore::create(opts);
     REQUIRE(store != nullptr);
+    std::printf("backend: %s\n", store->backend_name().c_str());
+    ScopedCleanup guard(store.get(), test_svc, test_acc);
 
     std::map<std::string, std::string> attrs = {{"arch", "x86_64"}, {"distro", "arch"}};
     Result res = store->store_secret(test_svc, test_acc, "linux_pass_1234", attrs);
@@ -42,7 +64,7 @@ static void test_linux_cred_crud() {
     CHECK_EQ(cred->service, test_svc);
     CHECK_EQ(cred->account, test_acc);
     CHECK_EQ(cred->secret, std::string("linux_pass_1234"));
-    CHECK_EQ(cred->attributes.at("distro"), std::string("arch"));
+    CHECK(cred->attributes.count("distro") == 1 && cred->attributes.at("distro") == "arch");
 
     auto list = store->list_credentials(test_svc);
     CHECK_EQ(list.size(), size_t(1));

@@ -53,6 +53,22 @@ inline int finish(const char* name) {
     std::exit(77);
 }
 
+// Tests with side effects a user would notice run only when opted in, e.g.
+// BROCRED_TEST_AUTH=1 for wrong-password attempts against the real account
+// (they feed failed-logon counters, lockout policies and the security log).
+inline bool opted_in(const char* var) {
+#if defined(_MSC_VER)
+    char* v = nullptr;
+    size_t n = 0;
+    bool on = _dupenv_s(&v, &n, var) == 0 && v && std::string(v) == "1";
+    std::free(v);
+    return on;
+#else
+    const char* v = std::getenv(var);
+    return v && std::string(v) == "1";
+#endif
+}
+
 inline bool wait_until(const std::function<bool()>& pred, std::chrono::milliseconds timeout,
                        std::chrono::milliseconds step = std::chrono::milliseconds(10)) {
     auto deadline = std::chrono::steady_clock::now() + timeout;

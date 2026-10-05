@@ -1,5 +1,9 @@
 #include "brocred/biometrics.h"
+#if defined(BROCRED_HAVE_SDBUS)
 #include "linux/dbus/dbus_bus.h"
+#else
+#include "linux/dbus/dbus_unavailable.h"
+#endif
 
 #include <pwd.h>
 #include <unistd.h>
@@ -7,6 +11,7 @@
 
 namespace brocred {
 
+#if defined(BROCRED_HAVE_SDBUS)
 namespace {
 
 std::string get_current_user() {
@@ -20,12 +25,21 @@ std::string get_current_user() {
 }
 
 }  // namespace
+#endif
 
 BiometricCapabilities get_biometric_capabilities() {
     BiometricCapabilities caps;
     caps.supported = false;
     caps.availability = BiometricAvailability::NotAvailable;
     caps.primary_type = BiometricType::None;
+
+#if !defined(BROCRED_HAVE_SDBUS)
+    // fprintd is only reachable over D-Bus; without it the state is unknown,
+    // not absent.
+    caps.availability = BiometricAvailability::Unknown;
+    caps.details = std::string("Cannot query fprintd: ") + linux_dbus::kNoSdBus;
+    return caps;
+#else
 
     auto bus = linux_dbus::BusConnection::open(linux_dbus::BusType::System);
     if (!bus || !bus->valid()) {
@@ -61,6 +75,7 @@ BiometricCapabilities get_biometric_capabilities() {
     }
 
     return caps;
+#endif
 }
 
 }  // namespace brocred

@@ -1,5 +1,6 @@
 #include "brocred/common.h"
 #include "brocred/biometrics.h"
+#include "brocred/features.h"
 #include "brocred/storage.h"
 #include "brocred/verifier.h"
 
@@ -38,6 +39,24 @@ const char* to_string(BiometricType t) {
         case BiometricType::Multiple:    return "Multiple";
     }
     return "None";
+}
+
+Features compiled_features() {
+    Features f;
+#if defined(_WIN32) || defined(__APPLE__)
+    f.native_secret_store = true;
+    f.password_verification = true;
+    f.biometrics_query = true;
+#else
+#if defined(BROCRED_HAVE_SDBUS)
+    f.native_secret_store = true;
+    f.biometrics_query = true;
+#endif
+#if defined(BROCRED_HAVE_PAM)
+    f.password_verification = true;
+#endif
+#endif
+    return f;
 }
 
 // Global convenience storage helpers

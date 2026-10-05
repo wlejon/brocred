@@ -40,8 +40,13 @@ static void test_secret_tool_roundtrip() {
     std::string test_svc = "brocred_oracle_linux_svc";
     std::string test_acc = "oracle_linux_user";
 
-    // Clean up initially
-    exec_cmd("secret-tool clear service " + test_svc + " account " + test_acc + " 2>/dev/null");
+    // The items land in the user's real keyring: clear them before, and after
+    // on every exit path (REQUIRE returns early).
+    struct Cleanup {
+        std::string cmd;
+        explicit Cleanup(std::string c) : cmd(std::move(c)) { exec_cmd(cmd); }
+        ~Cleanup() { exec_cmd(cmd); }
+    } cleanup("secret-tool clear service " + test_svc + " account " + test_acc + " 2>/dev/null");
 
     // Part 1: brocred writes, secret-tool reads back
     Result r = store->store_secret(test_svc, test_acc, "oracle_linux_pass_1");
@@ -63,8 +68,6 @@ static void test_secret_tool_roundtrip() {
     REQUIRE(read_back.has_value());
     CHECK_EQ(*read_back, std::string("oracle_tool_pass_2"));
 
-    // Cleanup
-    exec_cmd("secret-tool clear service " + test_svc + " account " + test_acc + " 2>/dev/null");
     store->delete_secret(test_svc, test_acc);
 }
 

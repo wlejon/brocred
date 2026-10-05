@@ -1,12 +1,35 @@
 #include "brocred/verifier.h"
 
+#include <string>
+
+#if !defined(BROCRED_HAVE_PAM)
+
+namespace brocred {
+
+// Built without PAM: there is no way to check a password, so say so.
+VerifyResult verify_password(const std::string& password) {
+    return verify_password("", "", password);
+}
+
+VerifyResult verify_password(const std::string& username, const std::string& password) {
+    return verify_password(username, "", password);
+}
+
+VerifyResult verify_password(const std::string&, const std::string&, const std::string&) {
+    return VerifyResult{false, "Password verification unavailable: brocred was built without PAM "
+                               "(install the PAM development package and reconfigure)"};
+}
+
+}  // namespace brocred
+
+#else
+
 #include <security/pam_appl.h>
 #include <pwd.h>
 #include <unistd.h>
 
 #include <cstdlib>
 #include <cstring>
-#include <string>
 
 namespace brocred {
 
@@ -108,3 +131,5 @@ VerifyResult verify_password(const std::string& username, const std::string& dom
 }
 
 }  // namespace brocred
+
+#endif  // BROCRED_HAVE_PAM

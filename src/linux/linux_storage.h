@@ -3,7 +3,11 @@
 
 #include "brocred/storage.h"
 #include "common/file_keystore.h"
+#if defined(BROCRED_HAVE_SDBUS)
 #include "linux/dbus/dbus_bus.h"
+#else
+#include "linux/dbus/dbus_unavailable.h"
+#endif
 
 #include <memory>
 #include <string>

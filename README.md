@@ -17,6 +17,7 @@ include/brocred/
   credential.h      Credential, CredentialMetadata
   event_queue.h     MessageQueue<T> (thread-safe, push/drain/wait_for/wake)
   events.h          CredentialChangedEvent, AuthPromptEvent, BiometricStatusEvent, EventQueue
+  features.h        compiled_features(): which optional integrations this build has
   storage.h         CredentialStore interface & global default store accessors
   verifier.h        verify_password, verify_password_async
   biometrics.h      get_biometric_capabilities, check_biometrics_async
@@ -67,9 +68,22 @@ Returns biometric availability (`Available`, `NotEnrolled`, `NotSupported`, `Per
 ### Prerequisites
 - **C++20** compliant compiler:
   - Windows: MSVC 2022+
-  - Linux: GCC 12+ or Clang 15+, `libsystemd-dev` / `systemd-libs`, `libpam0g-dev` / `pam`
+  - Linux: GCC 12+ or Clang 15+; optionally `libsystemd-dev` / `systemd-libs` and `libpam0g-dev` / `pam`
   - macOS: Xcode 14+ / Apple Clang
-- **CMake 3.20+**
+- **CMake 3.24+**
+
+### Optional Linux integrations
+
+| CMake option | Needs | Without it |
+|---|---|---|
+| `BROCRED_WITH_SDBUS` (`AUTO`/`ON`/`OFF`, default `AUTO`) | libsystemd >= 246 (sd-bus) | `CredentialStore` (Auto) uses the file keystore; `BackendType::System` fails with an explanation; biometrics report `Unknown` (fprintd cannot be asked) |
+| `BROCRED_WITH_PAM` (`AUTO`/`ON`/`OFF`, default `AUTO`) | PAM headers + library | `verify_password()` fails with an explanatory error |
+
+`AUTO` uses an integration when its development files are found, `ON` makes a
+missing one a configure error. `brocred::compiled_features()`
+(`brocred/features.h`) reports what a build contains; the runtime APIs
+(`backend_name()`, `get_biometric_capabilities()`) report whether the
+service is actually running.
 
 ### Windows (MSVC)
 ```powershell
@@ -95,4 +109,13 @@ ctest --test-dir build-release --output-on-failure
 ## Test Harness & Oracles
 - Tests use standard ctest without third-party frameworks (`tests/check.h`).
 - Tests exit with return code `77` when an environment prerequisite (e.g. absent CLI tool or headless environment without biometrics hardware) is honestly not present.
-- Every test guarantees zero leftover credentials, files, or background daemons.
+- Tests that store credentials in the real OS store (Credential Manager, login keychain, Secret Service keyring) delete their items before starting and again on every exit path (RAII). When no Secret Service runs, the Linux tests point the file keystore at a private temporary file instead of `~/.local/share`.
+
+### Opt-in tests
+
+A plain `ctest` changes nothing a user would notice beyond those scoped test items:
+
+| Variable | Enables |
+|---|---|
+| `BROCRED_TEST_AUTH=1` | Wrong-password attempts against the logged-in account in `test_*_verifier`. They count toward account-lockout policies (Windows 11 locks after 10 by default; `pam_faillock` after 3 on some distributions) and are logged as failed logons. By default only an account that does not exist is tried. |
+| `BROCRED_TEST_TEMP_KEYCHAIN=1` (macOS) | Runs the keychain tests against an unlocked temporary keychain made the default for the test's duration, for sessions whose login keychain is locked (SSH on a build Mac). It rewrites the user's keychain search list while it runs and restores it afterwards; a test killed mid-run leaves the preferences pointing at a deleted keychain. Without it, a locked login keychain makes those tests skip. |

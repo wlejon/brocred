@@ -1,6 +1,7 @@
 #include "check.h"
 #include "brocred/biometrics.h"
 #include "brocred/event_queue.h"
+#include "brocred/features.h"
 
 using namespace brocred;
 
@@ -23,6 +24,9 @@ static void test_fprint_capabilities() {
 }
 
 int main() {
+    if (!compiled_features().biometrics_query) {
+        bstest::skip("test_linux_biometrics", "built without sd-bus; test_linux_features covers that configuration");
+    }
     test_fprint_capabilities();
     return bstest::finish("test_linux_biometrics");
 }
