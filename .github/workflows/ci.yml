@@ -93,6 +93,16 @@ jobs:
         if: runner.os == 'Linux'
         run: dbus-run-session -- bash brocred/.github/scripts/with-keyring.sh ctest --test-dir build --output-on-failure
 
+      # ctest shows a skipped test's output nowhere, so its reason goes to the
+      # job summary: a skip is only honest if someone can read why.
+      - name: Skip reasons
+        if: always()
+        shell: bash
+        run: |
+          { echo "### Skipped tests (${{ matrix.name }})"; echo '```'
+            grep -h 'SKIPPED:' build/Testing/Temporary/LastTest*.log || echo none
+            echo '```'; } | tee -a "$GITHUB_STEP_SUMMARY"
+
   # ── Integration-free tier ─────────────────────────────────────────────────
   #
   # Both Linux integrations are optional. Without sd-bus the store is the file
@@ -120,6 +130,13 @@ jobs:
 
       - name: Test
         run: ctest --test-dir build --output-on-failure
+
+      - name: Skip reasons
+        if: always()
+        run: |
+          { echo '### Skipped tests (no sd-bus, no PAM)'; echo '```'
+            grep -h 'SKIPPED:' build/Testing/Temporary/LastTest*.log || echo none
+            echo '```'; } | tee -a "$GITHUB_STEP_SUMMARY"
 
   # ── Coverage ──────────────────────────────────────────────────────────────
   #
