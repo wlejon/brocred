@@ -1,0 +1,64 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+# brocred holds secrets and checks passwords, so the bugs that matter are the
+# ones that leak them: a secret left in freed memory or a log, a keystore file
+# created with loose permissions or through a predictable path, unchecked
+# lengths in the keystore's on-disk format or in Secret Service replies. Those
+# are what the C++ security queries look for. The Linux backends (sd-bus,
+# PAM, the file keystore) are what this analyses.
+#
+# brocred has no vendored or sibling code, so there is nothing to pre-build
+# outside the trace: every translation unit compiled below is ours.
+jobs:
+  analyze:
+    name: Analyze C++
+    runs-on: ubuntu-24.04
+    permissions:
+      security-events: write
+      contents: read
+      actions: read
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: brocred
+
+      - name: Install packages
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ninja-build pkg-config libsystemd-dev libpam0g-dev
+
+      # Tests off: they are scaffolding, and they handle throwaway secrets on
+      # purpose, which is exactly what the queries would flag.
+      - name: Configure
+        run: |
+          cmake -S brocred -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DBROCRED_BUILD_TESTS=OFF \
+            -DBROCRED_WITH_SDBUS=ON -DBROCRED_WITH_PAM=ON
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: c-cpp
+          build-mode: manual
+          source-root: brocred
+          queries: security-extended
+
+      - name: Build brocred (traced)
+        run: cmake --build build --parallel 4
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:c-cpp

@@ -1,5 +1,7 @@
 # brocred
 
+[![CI](https://github.com/wlejon/brocred/actions/workflows/ci.yml/badge.svg)](https://github.com/wlejon/brocred/actions/workflows/ci.yml)
+
 Cross-platform credential management, secret storage, lock-screen password verification, and biometric capability detection. A standalone C++20 library with zero external dependencies on bro or bronze, its own CMake build, and comprehensive ctest test suites.
 
 ## Overview & Architecture
@@ -64,6 +66,8 @@ Returns biometric availability (`Available`, `NotEnrolled`, `NotSupported`, `Per
 - **Linux**: Detects enrolled fingerprint sensors via `fprintd` system D-Bus service.
 
 ## Building & Testing
+
+There are no sibling repos to fetch: brocred links only the OS.
 
 ### Prerequisites
 - **C++20** compliant compiler:
