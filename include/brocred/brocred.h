@@ -1,0 +1,10 @@
+// Umbrella header for the brocred library.
+#pragma once
+
+#include "brocred/biometrics.h"
+#include "brocred/common.h"
+#include "brocred/credential.h"
+#include "brocred/event_queue.h"
+#include "brocred/events.h"
+#include "brocred/storage.h"
+#include "brocred/verifier.h"
