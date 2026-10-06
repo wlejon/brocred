@@ -33,7 +33,7 @@ env:
   BROCRED_TEST_AUTH: "1"
   BROCRED_TEST_TEMP_KEYCHAIN: "1"
   LINUX_PACKAGES: >-
-    ninja-build pkg-config libsystemd-dev libpam0g-dev
+    ninja-build pkg-config libsystemd-dev libpam0g-dev libssl-dev
     dbus-daemon dbus-bin libsecret-tools gnome-keyring
 
 jobs:

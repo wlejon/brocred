@@ -51,6 +51,8 @@ Features compiled_features() {
 #if defined(BROCRED_HAVE_SDBUS)
     f.native_secret_store = true;
     f.biometrics_query = true;
+    f.polkit_agent = true;
+    f.secret_service_provider = true;
 #endif
 #if defined(BROCRED_HAVE_PAM)
     f.password_verification = true;

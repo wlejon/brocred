@@ -24,6 +24,7 @@ endfunction()
 brocred_test(test_event_queue SOURCES common/test_event_queue.cpp)
 brocred_test(test_memory_keystore SOURCES common/test_memory_keystore.cpp)
 brocred_test(test_file_keystore SOURCES common/test_file_keystore.cpp)
+brocred_test(test_desktop_agents SOURCES common/test_desktop_agents.cpp)
 
 if(WIN32)
     brocred_test(test_win_credentials SOURCES win/test_win_credentials.cpp)

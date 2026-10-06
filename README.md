@@ -23,6 +23,8 @@ include/brocred/
   storage.h         CredentialStore interface & global default store accessors
   verifier.h        verify_password, verify_password_async
   biometrics.h      get_biometric_capabilities, check_biometrics_async
+  polkit_agent.h    PolkitAgent: a PolicyKit authentication agent (Linux)
+  secret_service.h  SecretServiceProvider: serves org.freedesktop.secrets from a CredentialStore (Linux)
 ```
 
 ## Backend Implementation Matrix
@@ -51,6 +53,28 @@ include/brocred/
 - Detects bus ownership (`has_owner`) and enforces strict 2-second call timeouts to prevent hangs in headless/SSH environments.
 - When no Secret Service daemon is registered, cleanly falls back to `FileKeystore` (`~/.local/share/brocred/credentials.store` with POSIX `0600` permissions and atomic `.tmp` writes) or `MemoryKeystore`.
 
+## Desktop agents (Linux)
+
+For a desktop shell that is its own session, brocred also provides the two
+services a Linux session expects someone to run:
+
+- **`PolkitAgent`** registers as the PolicyKit authentication agent
+  (`org.freedesktop.PolicyKit1.AuthenticationAgent`), hands each
+  `BeginAuthentication` to your handler (the shell's password prompt) and
+  completes it with the authority.
+- **`SecretServiceProvider`** serves `org.freedesktop.secrets` (collections,
+  items, `plain` and `dh-ietf1024-sha256-aes128-cbc-pkcs7` sessions) backed by
+  any `CredentialStore`, so `secret-tool`, libsecret and browsers can store
+  secrets in it.
+
+Both need sd-bus, and the encrypted session needs OpenSSL's libcrypto. On
+Windows and macOS (neither has PolicyKit or the Secret Service), and on Linux
+without sd-bus, the factories still return objects whose `start()` fails with
+the reason; `compiled_features().polkit_agent` and `.secret_service_provider`
+report it up front. The Linux tests run both on private `dbus-daemon` buses
+and call them over the wire with sd-bus, the way a client would
+(`test_secret_service`, `test_polkit_agent`, `test_linux_dbus_client`).
+
 ## Lock-Screen Password Verification
 
 `brocred` verifies local user passwords non-destructively:
@@ -72,7 +96,7 @@ There are no sibling repos to fetch: brocred links only the OS.
 ### Prerequisites
 - **C++20** compliant compiler:
   - Windows: MSVC 2022+
-  - Linux: GCC 12+ or Clang 15+; optionally `libsystemd-dev` / `systemd-libs` and `libpam0g-dev` / `pam`
+  - Linux: GCC 12+ or Clang 15+; optionally `libsystemd-dev` / `systemd-libs` with `libssl-dev` / `openssl`, and `libpam0g-dev` / `pam`
   - macOS: Xcode 14+ / Apple Clang
 - **CMake 3.24+**
 
@@ -80,7 +104,7 @@ There are no sibling repos to fetch: brocred links only the OS.
 
 | CMake option | Needs | Without it |
 |---|---|---|
-| `BROCRED_WITH_SDBUS` (`AUTO`/`ON`/`OFF`, default `AUTO`) | libsystemd >= 246 (sd-bus) | `CredentialStore` (Auto) uses the file keystore; `BackendType::System` fails with an explanation; biometrics report `Unknown` (fprintd cannot be asked) |
+| `BROCRED_WITH_SDBUS` (`AUTO`/`ON`/`OFF`, default `AUTO`) | libsystemd >= 246 (sd-bus), and OpenSSL libcrypto for the Secret Service provider's encrypted sessions | `CredentialStore` (Auto) uses the file keystore; `BackendType::System` fails with an explanation; biometrics report `Unknown` (fprintd cannot be asked); `PolkitAgent` and `SecretServiceProvider` report themselves unavailable |
 | `BROCRED_WITH_PAM` (`AUTO`/`ON`/`OFF`, default `AUTO`) | PAM headers + library | `verify_password()` fails with an explanatory error |
 
 `AUTO` uses an integration when its development files are found, `ON` makes a

@@ -38,7 +38,7 @@ jobs:
       - name: Install packages
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends ninja-build pkg-config libsystemd-dev libpam0g-dev
+          sudo apt-get install -y --no-install-recommends ninja-build pkg-config libsystemd-dev libpam0g-dev libssl-dev
 
       # Tests off: they are scaffolding, and they handle throwaway secrets on
       # purpose, which is exactly what the queries would flag.
