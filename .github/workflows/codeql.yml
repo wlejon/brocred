@@ -19,8 +19,11 @@ concurrency:
 # are what the C++ security queries look for. The Linux backends (sd-bus,
 # PAM, the file keystore) are what this analyses.
 #
-# brocred has no vendored or sibling code, so there is nothing to pre-build
-# outside the trace: every translation unit compiled below is ours.
+# The siblings CMake compiles into the build (brodbus; bronze and brass for
+# brocred_api, on in a top-level build) are pre-built ahead of `init`, so they
+# are never traced: for a compiled language CodeQL extracts only what it
+# watches being compiled, and each sibling is analysed in its own repository.
+# Every translation unit compiled after `init` is ours.
 jobs:
   analyze:
     name: Analyze C++
@@ -35,6 +38,13 @@ jobs:
         with:
           path: brocred
 
+      - uses: actions/checkout@v7
+        with:
+          repository: wlejon/brodbus
+          path: brodbus
+
+      - uses: wlejon/bronze/.github/actions/checkout-toolchain@main
+
       - name: Install packages
         run: |
           sudo apt-get update -qq
@@ -46,6 +56,9 @@ jobs:
         run: |
           cmake -S brocred -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DBROCRED_BUILD_TESTS=OFF \
             -DBROCRED_WITH_SDBUS=ON -DBROCRED_WITH_PAM=ON
+
+      - name: Pre-build siblings (outside the traced build)
+        run: cmake --build build --parallel 4 --target bronze_runtime_shared brodbus
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v4

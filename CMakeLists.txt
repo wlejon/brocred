@@ -179,7 +179,10 @@ elseif(APPLE)
 endif()
 
 # --- Standalone Bronze JavaScript API ---
-option(BROCRED_ENABLE_API "Build Bronze JavaScript API" ON)
+# On by default only when brocred is the top-level project. A library that
+# consumes brocred then never needs bronze checked out; bro, which does want
+# the binding, sets BROCRED_ENABLE_API ON itself.
+option(BROCRED_ENABLE_API "Build Bronze JavaScript API" ${PROJECT_IS_TOP_LEVEL})
 if(BROCRED_ENABLE_API)
     if(NOT TARGET bronze_runtime_shared)
         set(BRONZE_BUILD_SHARED_RUNTIME ON CACHE BOOL "" FORCE)
