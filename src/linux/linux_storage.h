@@ -10,6 +10,7 @@
 #endif
 
 #include <memory>
+#include <mutex>
 #include <string>
 
 namespace brocred {
@@ -50,6 +51,7 @@ private:
     EventQueue events_;
     bool force_system_ = false;
     bool dbus_failed_ = false;
+    mutable std::mutex mu_;
 };
 
 }  // namespace brocred

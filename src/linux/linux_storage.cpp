@@ -32,6 +32,7 @@ LinuxSecretServiceStore::LinuxSecretServiceStore(std::string custom_file_path, b
 }
 
 bool LinuxSecretServiceStore::is_using_secret_service() const {
+    std::lock_guard lock(mu_);
     return bus_ && bus_->valid() && !dbus_failed_;
 }
 
@@ -43,7 +44,7 @@ std::string LinuxSecretServiceStore::backend_name() const {
 }
 
 bool LinuxSecretServiceStore::ensure_session(std::string* error) {
-    if (!is_using_secret_service()) {
+    if (!bus_ || !bus_->valid() || dbus_failed_) {
         if (error) {
 #if defined(BROCRED_HAVE_SDBUS)
             *error = bus_ && bus_->valid()
@@ -74,6 +75,7 @@ Result LinuxSecretServiceStore::store_secret(const std::string& service, const s
 Result LinuxSecretServiceStore::store_secret(const std::string& service, const std::string& account,
                                             const std::string& secret,
                                             const std::map<std::string, std::string>& attributes) {
+    std::lock_guard lock(mu_);
     if (service.empty()) {
         return Result::failure("Service name cannot be empty");
     }
@@ -132,6 +134,7 @@ std::optional<std::string> LinuxSecretServiceStore::read_secret(const std::strin
 
 std::optional<Credential> LinuxSecretServiceStore::read_credential(const std::string& service,
                                                                   const std::string& account) {
+    std::lock_guard lock(mu_);
     if (service.empty()) return std::nullopt;
 
     std::string err;
@@ -183,6 +186,7 @@ std::optional<Credential> LinuxSecretServiceStore::read_credential(const std::st
 }
 
 Result LinuxSecretServiceStore::delete_secret(const std::string& service, const std::string& account) {
+    std::lock_guard lock(mu_);
     if (service.empty()) {
         return Result::failure("Service name cannot be empty");
     }
@@ -245,6 +249,7 @@ std::vector<CredentialMetadata> LinuxSecretServiceStore::list_credentials() {
 }
 
 std::vector<CredentialMetadata> LinuxSecretServiceStore::list_credentials(const std::string& service) {
+    std::lock_guard lock(mu_);
     std::string err;
     if (ensure_session(&err)) {
         std::map<std::string, std::string> query_attrs;

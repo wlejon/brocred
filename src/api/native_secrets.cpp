@@ -12,6 +12,8 @@ namespace brocred::api {
 
 namespace {
 
+std::mutex s_storeOpMu;
+
 std::map<std::string, std::string> parseMeta(Value metaVal) {
     std::map<std::string, std::string> map;
     if (!ev::isObject(metaVal)) return map;
@@ -100,6 +102,7 @@ void installSecretsOnto(Value credObj) {
         std::string account = ev::isString(p1.get()) ? ev::toUtf8(p1.get()) : "";
 
         if (isSyncOption(p2.get())) {
+            std::lock_guard lock(s_storeOpMu);
             auto sec = activeStore()->read_secret(service, account);
             return sec.has_value() ? ev::fromUtf8(*sec) : ev::null();
         }
@@ -110,6 +113,7 @@ void installSecretsOnto(Value credObj) {
 
         auto outSec = std::make_shared<std::optional<std::string>>();
         job->run = [service, account, outSec]() {
+            std::lock_guard lock(s_storeOpMu);
             *outSec = activeStore()->read_secret(service, account);
         };
         job->settle = [outSec](Value pVal) {
@@ -133,6 +137,7 @@ void installSecretsOnto(Value credObj) {
         std::string service = ev::isString(p0.get()) ? ev::toUtf8(p0.get()) : "";
         std::string account = ev::isString(p1.get()) ? ev::toUtf8(p1.get()) : "";
 
+        std::lock_guard lock(s_storeOpMu);
         auto sec = activeStore()->read_secret(service, account);
         return sec.has_value() ? ev::fromUtf8(*sec) : ev::null();
     });
@@ -151,6 +156,7 @@ void installSecretsOnto(Value credObj) {
         auto metaMap = parseMeta(p3.get());
 
         if (isSyncOption(p3.get()) || isSyncOption(p4.get())) {
+            std::lock_guard lock(s_storeOpMu);
             brocred::Result res = activeStore()->store_secret(service, account, secret, metaMap);
             return ev::fromBool(res.ok);
         }
@@ -161,6 +167,7 @@ void installSecretsOnto(Value credObj) {
 
         auto outRes = std::make_shared<brocred::Result>();
         job->run = [service, account, secret, metaMap, outRes]() {
+            std::lock_guard lock(s_storeOpMu);
             *outRes = activeStore()->store_secret(service, account, secret, metaMap);
         };
         job->settle = [outRes](Value pVal) {
@@ -183,6 +190,7 @@ void installSecretsOnto(Value credObj) {
         std::string secret = ev::isString(p2.get()) ? ev::toUtf8(p2.get()) : "";
         auto metaMap = parseMeta(p3.get());
 
+        std::lock_guard lock(s_storeOpMu);
         brocred::Result res = activeStore()->store_secret(service, account, secret, metaMap);
         return ev::fromBool(res.ok);
     });
@@ -197,6 +205,7 @@ void installSecretsOnto(Value credObj) {
         std::string account = ev::isString(p1.get()) ? ev::toUtf8(p1.get()) : "";
 
         if (isSyncOption(p2.get())) {
+            std::lock_guard lock(s_storeOpMu);
             brocred::Result res = activeStore()->delete_secret(service, account);
             return ev::fromBool(res.ok);
         }
@@ -207,6 +216,7 @@ void installSecretsOnto(Value credObj) {
 
         auto outRes = std::make_shared<brocred::Result>();
         job->run = [service, account, outRes]() {
+            std::lock_guard lock(s_storeOpMu);
             *outRes = activeStore()->delete_secret(service, account);
         };
         job->settle = [outRes](Value pVal) {
@@ -225,6 +235,7 @@ void installSecretsOnto(Value credObj) {
         std::string service = ev::isString(p0.get()) ? ev::toUtf8(p0.get()) : "";
         std::string account = ev::isString(p1.get()) ? ev::toUtf8(p1.get()) : "";
 
+        std::lock_guard lock(s_storeOpMu);
         brocred::Result res = activeStore()->delete_secret(service, account);
         return ev::fromBool(res.ok);
     });
@@ -242,6 +253,7 @@ void installSecretsOnto(Value credObj) {
         }
 
         if (isSyncOption(p0.get()) || isSyncOption(p1.get())) {
+            std::lock_guard lock(s_storeOpMu);
             auto list = hasService ? activeStore()->list_credentials(service)
                                    : activeStore()->list_credentials();
             return credListToJs(list);
@@ -253,6 +265,7 @@ void installSecretsOnto(Value credObj) {
 
         auto outList = std::make_shared<std::vector<brocred::CredentialMetadata>>();
         job->run = [service, hasService, outList]() {
+            std::lock_guard lock(s_storeOpMu);
             *outList = hasService ? activeStore()->list_credentials(service)
                                   : activeStore()->list_credentials();
         };
@@ -274,6 +287,7 @@ void installSecretsOnto(Value credObj) {
             service = ev::toUtf8(p0.get());
             hasService = true;
         }
+        std::lock_guard lock(s_storeOpMu);
         auto list = hasService ? activeStore()->list_credentials(service)
                                : activeStore()->list_credentials();
         return credListToJs(list);
