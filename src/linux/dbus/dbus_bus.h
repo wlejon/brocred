@@ -1,7 +1,8 @@
 // Minimal sd-bus client helper for brocred on Linux.
 #pragma once
 
-#include <systemd/sd-bus.h>
+#include "brodbus/bus.h"
+#include "brodbus/error.h"
 
 #include <chrono>
 #include <map>
@@ -20,10 +21,14 @@ enum class BusType {
 class BusConnection {
 public:
     static std::unique_ptr<BusConnection> open(BusType type, const std::string& address = "");
+    explicit BusConnection(brodbus::Bus bus);
+    explicit BusConnection(sd_bus* bus);
     ~BusConnection();
 
-    bool valid() const { return bus_ != nullptr; }
-    sd_bus* get() const { return bus_; }
+    bool valid() const { return bus_.is_valid(); }
+    sd_bus* get() const { return bus_.raw(); }
+    brodbus::Bus& bus() { return bus_; }
+    const brodbus::Bus& bus() const { return bus_; }
 
     // Returns true if a bus name is currently owned or activatable.
     bool has_owner(const std::string& name);
@@ -68,8 +73,7 @@ public:
                                       std::string* error = nullptr);
 
 private:
-    BusConnection(sd_bus* bus);
-    sd_bus* bus_ = nullptr;
+    brodbus::Bus bus_;
 };
 
 }  // namespace brocred::linux_dbus

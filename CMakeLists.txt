@@ -88,6 +88,32 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     file(GLOB _linux_sources CONFIGURE_DEPENDS src/linux/*.cpp)
     list(APPEND BROCRED_SOURCES ${_linux_sources})
     if(BROCRED_HAVE_SDBUS)
+        if(NOT TARGET brodbus::brodbus)
+            if(DEFINED BRODBUS_DIR AND EXISTS "${BRODBUS_DIR}/CMakeLists.txt")
+                # Explicit BRODBUS_DIR supplied
+            elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../brodbus/CMakeLists.txt")
+                set(BRODBUS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../brodbus" CACHE PATH "brodbus source tree")
+            elseif(EXISTS "${CMAKE_SOURCE_DIR}/../brodbus/CMakeLists.txt")
+                set(BRODBUS_DIR "${CMAKE_SOURCE_DIR}/../brodbus" CACHE PATH "brodbus source tree")
+            elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/brodbus/CMakeLists.txt")
+                set(BRODBUS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/brodbus" CACHE PATH "brodbus source tree")
+            elseif(EXISTS "${CMAKE_SOURCE_DIR}/third_party/brodbus/CMakeLists.txt")
+                set(BRODBUS_DIR "${CMAKE_SOURCE_DIR}/third_party/brodbus" CACHE PATH "brodbus source tree")
+            endif()
+
+            if(NOT BRODBUS_DIR OR NOT EXISTS "${BRODBUS_DIR}/CMakeLists.txt")
+                message(FATAL_ERROR
+                    "brocred needs brodbus: not found at ${BRODBUS_DIR} or "
+                    "${CMAKE_SOURCE_DIR}/third_party/brodbus. Clone https://github.com/wlejon/brodbus next "
+                    "to this repo, run `git submodule update --init --recursive`, or override with "
+                    "-DBRODBUS_DIR=...")
+            endif()
+
+            set(BRODBUS_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+            message(STATUS "brocred: brodbus from ${BRODBUS_DIR}")
+            add_subdirectory("${BRODBUS_DIR}" "${CMAKE_BINARY_DIR}/brodbus" EXCLUDE_FROM_ALL)
+        endif()
+
         find_package(OpenSSL REQUIRED)
         file(GLOB _dbus_sources CONFIGURE_DEPENDS src/linux/dbus/*.cpp)
         list(APPEND BROCRED_SOURCES ${_dbus_sources})
@@ -132,7 +158,7 @@ if(WIN32)
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_libraries(brocred PUBLIC Threads::Threads)
     if(BROCRED_HAVE_SDBUS)
-        target_link_libraries(brocred PRIVATE PkgConfig::BROCRED_SDBUS OpenSSL::Crypto)
+        target_link_libraries(brocred PUBLIC brodbus::brodbus PRIVATE PkgConfig::BROCRED_SDBUS OpenSSL::Crypto)
         target_compile_definitions(brocred PRIVATE BROCRED_HAVE_SDBUS=1)
     endif()
     if(BROCRED_HAVE_PAM)
