@@ -54,3 +54,53 @@ elseif(APPLE)
     # Both may swap the default keychain (BROCRED_TEST_TEMP_KEYCHAIN=1): never concurrently.
     set_tests_properties(test_mac_credentials test_mac_security_oracle PROPERTIES RESOURCE_LOCK user_keychain)
 endif()
+
+if(BROCRED_ENABLE_API)
+    add_executable(brocred_test_api
+        test_cred_api.cpp
+    )
+    target_include_directories(brocred_test_api PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src/api
+        ${PROJECT_SOURCE_DIR}
+    )
+    target_link_libraries(brocred_test_api PRIVATE
+        brocred_api
+        brocred
+        bronze_runtime_shared
+    )
+    if(MSVC)
+        target_compile_options(brocred_test_api PRIVATE /W4 /permissive- /utf-8)
+        target_compile_definitions(brocred_test_api PRIVATE UNICODE _UNICODE _CRT_SECURE_NO_WARNINGS)
+        add_custom_command(TARGET brocred_test_api POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_FILE:bronze_runtime_shared>
+                $<TARGET_FILE_DIR:brocred_test_api>
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_LINKER_FILE:bronze_runtime_shared>
+                $<TARGET_FILE_DIR:brocred_test_api>
+        )
+    else()
+        target_compile_options(brocred_test_api PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+
+    if(NOT BRASS_HOST_BACKEND)
+        message(STATUS "brocred: brocred_test_api not registered (brass has no code generator for this target)")
+    else()
+        add_test(NAME brocred_test_api COMMAND brocred_test_api)
+        set_tests_properties(brocred_test_api PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
+
+        add_test(NAME brocred_test_api_gc_stress COMMAND brocred_test_api)
+        set_tests_properties(brocred_test_api_gc_stress PROPERTIES
+            TIMEOUT 120
+            SKIP_RETURN_CODE 77
+            ENVIRONMENT "BRONZE_GC_STRESS=1;BRONZE_GC_POISON=1"
+        )
+        if(WIN32)
+            set_tests_properties(brocred_test_api PROPERTIES
+                ENVIRONMENT "PATH=$<TARGET_FILE_DIR:bronze_runtime_shared>;$<TARGET_FILE_DIR:brocred_test_api>;$ENV{PATH}")
+            set_property(TEST brocred_test_api_gc_stress APPEND PROPERTY
+                ENVIRONMENT "PATH=$<TARGET_FILE_DIR:bronze_runtime_shared>;$<TARGET_FILE_DIR:brocred_test_api>;$ENV{PATH}")
+        endif()
+    endif()
+endif()
