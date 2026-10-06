@@ -122,6 +122,9 @@ target_include_directories(brocred
 brocred_warnings(brocred)
 
 if(WIN32)
+    if(EXISTS "${CMAKE_BINARY_DIR}/cppwinrt")
+        target_include_directories(brocred PRIVATE "${CMAKE_BINARY_DIR}/cppwinrt")
+    endif()
     target_compile_definitions(brocred PRIVATE
         NOMINMAX WIN32_LEAN_AND_MEAN UNICODE _UNICODE _WIN32_WINNT=0x0A00)
     target_link_libraries(brocred PRIVATE
