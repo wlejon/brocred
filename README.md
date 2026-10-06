@@ -1,149 +1,166 @@
 # brocred
 
 [![CI](https://github.com/wlejon/brocred/actions/workflows/ci.yml/badge.svg)](https://github.com/wlejon/brocred/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Cross-platform credential management, secret storage, lock-screen password verification, and biometric capability detection. A standalone C++20 library with zero external dependencies on bro or bronze, its own CMake build, and comprehensive ctest test suites.
+Cross-platform credential management, secure secret storage, lock-screen password verification,
+and biometric capability detection. A standalone C++20 library providing native operating
+system integrations for Linux, Windows, and macOS with zero required dependencies on bro or
+bronze.
 
-## Overview & Architecture
+brocred sits in the desktop-environment layer of the
+[bro ecosystem](https://github.com/wlejon/bro/blob/main/docs/ecosystem.md). It is consumed by
+the [bro runtime](https://github.com/wlejon/bro) under the `BRO_WITH_CRED` build gate. The
+engine mounts its JavaScript binding (`brocred_api` in `src/api/`) onto `bro.cred`, providing
+desktop applications with secure credential access and authentication primitives through
+bronze.
 
-`brocred` provides native system credential management following the same architectural patterns as `brosys`:
-- **Thread Safety & Async Draining**: Asynchronous calls push events into a lock-free/thread-safe `MessageQueue<T>` (`include/brocred/event_queue.h`). The host drains queued events on its own loop via an optional wake hook without blocking callbacks.
-- **Honest Capability Reporting**: No mocks in public APIs; native backends report true underlying capabilities or graceful degraded fallbacks.
-- **Strict File Decomposition**: All files are strictly under 1,000 LOC.
-- **Real OS Test Oracles**: Automated ctests invoke real operating system utilities (`cmdkey.exe`, macOS `/usr/bin/security`, Linux `secret-tool`, or an isolated private D-Bus daemon) and assert mutual read/write interoperability with zero machine leftovers (unconditional cleanup).
+## Architecture & API Overview
+
+`brocred` uses the same asynchronous, non-blocking patterns as `brosys`:
+- **Asynchronous Event Delivery:** Long-running calls and notifications push events into a
+  thread-safe `MessageQueue<T>` (`event_queue.h`), drained by the host thread via an optional
+  wake hook.
+- **Honest Capability Reporting:** Public APIs query underlying system capabilities directly
+  without synthetic mocks. Feature availability is reported by `compiled_features()`
+  (`features.h`) and runtime status queries.
+- **Decomposed Architecture:** Clean separation of concerns with all source files strictly
+  under 1,000 lines of code.
 
 ```
 include/brocred/
   brocred.h         Umbrella header
-  common.h          Result, Availability, BiometricAvailability, BiometricType, stream operators
-  credential.h      Credential, CredentialMetadata
-  event_queue.h     MessageQueue<T> (thread-safe, push/drain/wait_for/wake)
-  events.h          CredentialChangedEvent, AuthPromptEvent, BiometricStatusEvent, EventQueue
-  features.h        compiled_features(): which optional integrations this build has
-  storage.h         CredentialStore interface & global default store accessors
-  verifier.h        verify_password, verify_password_async
+  common.h          Result, Availability, BiometricAvailability, BiometricType
+  credential.h      Credential value type, CredentialMetadata
+  event_queue.h     MessageQueue<T> (thread-safe MPSC queue with wake hook)
+  events.h          CredentialChangedEvent, AuthPromptEvent, BiometricStatusEvent
+  features.h        compiled_features(): compile-time feature query
+  storage.h         CredentialStore interface, default_store(), memory/file keystores
+  verifier.h        verify_password, verify_password_async (lock-screen verification)
   biometrics.h      get_biometric_capabilities, check_biometrics_async
-  polkit_agent.h    PolkitAgent: a PolicyKit authentication agent (Linux)
-  secret_service.h  SecretServiceProvider: serves org.freedesktop.secrets from a CredentialStore (Linux)
+  polkit_agent.h    PolkitAgent: PolicyKit authentication agent for desktop shells (Linux)
+  secret_service.h  SecretServiceProvider: exports org.freedesktop.secrets over D-Bus (Linux)
+  api.h             Bronze JavaScript binding entry point (brocred_api)
 ```
 
 ## Backend Implementation Matrix
 
-| Capability | Windows | macOS | Linux |
+| Capability | Linux | Windows | macOS |
 |---|---|---|---|
-| **Secret Storage** | Windows Credential Manager (`CredWriteW`, `CredReadW`, `CredDeleteW`, `CredEnumerateW`) | Apple Keychain Services (`SecItemAdd`, `SecItemCopyMatching`, `SecItemDelete`, `SecItemUpdate`) | FreeDesktop Secret Service over D-Bus (`org.freedesktop.secrets` via `sd-bus`) with automatic fallback to `FileKeystore` |
-| **Password Verification** | Win32 `LogonUserW` (`LOGON32_LOGON_NETWORK` / `LOGON32_LOGON_INTERACTIVE`) | OpenDirectory (`ODSession`, `ODNode`, `ODRecordVerifyPassword`) | Linux PAM (`pam_start`, `pam_authenticate`, conversation handler) |
-| **Biometrics Detection** | Windows Hello (`UserConsentVerifier` WinRT) & Windows Biometric Framework (`WinBioEnumBiometricUnits`) | LocalAuthentication (`LAContext canEvaluatePolicy:LAPolicyDeviceOwnerAuthenticationWithBiometrics:`) | `fprintd` over system D-Bus (`net.reactivated.Fprint.Manager` via `sd-bus`) |
-| **Test Oracles** | `cmdkey.exe /generic:... /user:... /pass:...` | `/usr/bin/security add-generic-password` / `find-generic-password` | Isolated private `dbus-daemon` mock & `secret-tool` |
+| **Secret Storage** | FreeDesktop Secret Service (`org.freedesktop.secrets` via `brodbus` + `sd-bus`), with fallback to `FileKeystore` (`0600` permissions) | Windows Credential Manager (`CredWriteW`, `CredReadW`, `CredDeleteW`, `CredEnumerateW`) | Apple Keychain Services (`SecItemAdd`, `SecItemCopyMatching`, `SecItemDelete`, `SecItemUpdate`) |
+| **Password Verification** | Linux PAM (`pam_start`, `pam_authenticate` via `/etc/pam.d/login`) | Win32 `LogonUserW` (`LOGON32_LOGON_NETWORK` / `LOGON32_LOGON_INTERACTIVE`) | OpenDirectory framework (`ODSession`, `ODNode`, `ODRecordVerifyPassword`) |
+| **Biometrics Detection** | `fprintd` over system D-Bus (`net.reactivated.Fprint.Manager` via `brodbus`) | Windows Hello (`UserConsentVerifier`) & Windows Biometric Framework (`WinBioEnumBiometricUnits`) | LocalAuthentication framework (`LAContext canEvaluatePolicy:`) |
+| **Desktop Shell Agents** | `PolkitAgent` (PolicyKit1 agent) & `SecretServiceProvider` (D-Bus secrets provider) | Unsupported (returns explanatory error) | Unsupported (returns explanatory error) |
 
-## Secret Storage Backends
+### Secret Storage Details
 
-### Windows Credential Manager
-- Targets stored with format `service:account` or custom target names.
-- Automatic UTF-16LE / UTF-8 blob decoding for seamless compatibility with third-party Windows apps and `cmdkey`.
-- Custom key-value attributes stored via `CREDENTIAL_ATTRIBUTEW`.
+- **Windows Credential Manager:** Stored with format `service:account` or custom target names.
+  Handles UTF-16LE and UTF-8 conversion transparently for interoperability with `cmdkey.exe`
+  and third-party Windows software. Custom attributes use `CREDENTIAL_ATTRIBUTEW`.
+- **macOS Keychain:** Stores generic passwords (`kSecClassGenericPassword`). Custom attributes
+  and metadata serialize to structured JSON in `kSecAttrGeneric`. Non-interactive testing
+  supports isolated keychain search lists (`SecKeychainCopySearchList`).
+- **Linux Secret Service & Keystores:** Connects to the D-Bus session bus via `brodbus` and
+  `sd-bus` to communicate with GNOME Keyring or KWallet. Enforces strict 2-second timeouts to
+  prevent hangs in headless environments. When no daemon is available, falls back to
+  `FileKeystore` (`~/.local/share/brocred/credentials.store` with POSIX `0600` mode and atomic
+  temp staging) or `MemoryKeystore`.
 
-### macOS Keychain
-- Generic passwords stored in macOS Keychain (`kSecClassGenericPassword`).
-- Metadata and custom attributes serialized as structured JSON in `kSecAttrGeneric`.
-- Non-interactive test isolation supports custom keychain search lists (`SecKeychainCopySearchList`, `kSecMatchSearchList`).
+### Linux Desktop Shell Agents
 
-### Linux Secret Service & Fallback Keystore
-- Connects directly to the D-Bus session bus using `sd-bus` to communicate with `org.freedesktop.secrets` (GNOME Keyring, KWallet).
-- Detects bus ownership (`has_owner`) and enforces strict 2-second call timeouts to prevent hangs in headless/SSH environments.
-- When no Secret Service daemon is registered, cleanly falls back to `FileKeystore` (`~/.local/share/brocred/credentials.store` with POSIX `0600` permissions and atomic `.tmp` writes) or `MemoryKeystore`.
+For desktop shells acting as their own session, brocred provides standard Linux session
+services:
+- **`PolkitAgent`:** Registers as `org.freedesktop.PolicyKit1.AuthenticationAgent`, routing
+  authentication requests to the shell's prompt handler and completing them with PolicyKit.
+- **`SecretServiceProvider`:** Serves `org.freedesktop.secrets` (collections, items, `plain`
+  and `dh-ietf1024-sha256-aes128-cbc-pkcs7` sessions backed by OpenSSL libcrypto), allowing
+  browsers and `secret-tool` to store credentials in any `CredentialStore`.
 
-## Desktop agents (Linux)
+## Building & Dependencies
 
-For a desktop shell that is its own session, brocred also provides the two
-services a Linux session expects someone to run:
+brocred requires CMake 3.24+ and a C++20 compiler.
 
-- **`PolkitAgent`** registers as the PolicyKit authentication agent
-  (`org.freedesktop.PolicyKit1.AuthenticationAgent`), hands each
-  `BeginAuthentication` to your handler (the shell's password prompt) and
-  completes it with the authority.
-- **`SecretServiceProvider`** serves `org.freedesktop.secrets` (collections,
-  items, `plain` and `dh-ietf1024-sha256-aes128-cbc-pkcs7` sessions) backed by
-  any `CredentialStore`, so `secret-tool`, libsecret and browsers can store
-  secrets in it.
+### Dependencies
 
-Both need sd-bus, and the encrypted session needs OpenSSL's libcrypto. On
-Windows and macOS (neither has PolicyKit or the Secret Service), and on Linux
-without sd-bus, the factories still return objects whose `start()` fails with
-the reason; `compiled_features().polkit_agent` and `.secret_service_provider`
-report it up front. The Linux tests run both on private `dbus-daemon` buses
-and call them over the wire with sd-bus, the way a client would
-(`test_secret_service`, `test_polkit_agent`, `test_linux_dbus_client`).
+- **Linux:**
+  - Requires **[brodbus](https://github.com/wlejon/brodbus)** on Linux when building with D-Bus support (`BROCRED_WITH_SDBUS`).
+  - Requires `libsystemd-dev` (sd-bus >= 246) and `libssl-dev` (OpenSSL libcrypto for DH secret service sessions).
+  - Requires `libpam0g-dev` for PAM password verification (`BROCRED_WITH_PAM`).
+- **Windows:** MSVC 2022+; links `advapi32`, `credui`, `user32`.
+- **macOS:** Apple Clang (macOS 13+); links `Security`, `OpenDirectory`, `LocalAuthentication`, `Foundation`.
 
-## Lock-Screen Password Verification
+### Dependency Resolution (brodbus)
 
-`brocred` verifies local user passwords non-destructively:
-- **Windows**: `LogonUserW` validates credentials without needing elevated Administrator privileges. Distinguishes incorrect passwords (`ERROR_LOGON_FAILURE`) from locked or expired accounts.
-- **macOS**: `ODRecordVerifyPassword` checks passwords through macOS OpenDirectory directly without spawning GUI prompts.
-- **Linux**: PAM conversation using `/etc/pam.d/login` or `/etc/pam.d/system-auth`.
+On Linux, `brocred` locates the `brodbus` library following the ecosystem dependency convention:
+1. **Existing target:** Uses `brodbus::brodbus` if already defined by a parent build.
+2. **Sibling checkout (development default):** Located at `../brodbus` beside this repository (or `-DBRODBUS_DIR=<path>`).
+3. **Submodule layout (isolated / CI builds):** Embedded in `third_party/brodbus`.
 
-## Biometric Capabilities
+```bash
+# Sibling layout:
+git clone https://github.com/wlejon/brocred
+git clone https://github.com/wlejon/brodbus   # Sibling directory
 
-Returns biometric availability (`Available`, `NotEnrolled`, `NotSupported`, `PermissionDenied`):
-- **Windows**: Detects whether Windows Hello Facial Recognition or Fingerprint sensors are present and configured.
-- **macOS**: Identifies Touch ID or Face ID support via `LAContext`.
-- **Linux**: Detects enrolled fingerprint sensors via `fprintd` system D-Bus service.
+# Submodule layout:
+git clone --recursive https://github.com/wlejon/brocred
+# or:
+git submodule update --init --recursive
+```
 
-## Building & Testing
+### Standalone Build
 
-There are no sibling repos to fetch: brocred links only the OS.
+```bash
+# Linux (GCC / Clang + Ninja)
+sudo apt install libsystemd-dev libpam0g-dev libssl-dev pkg-config ninja-build
+cmake -B build-release -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build-release
+ctest --test-dir build-release --output-on-failure
 
-### Prerequisites
-- **C++20** compliant compiler:
-  - Windows: MSVC 2022+
-  - Linux: GCC 12+ or Clang 15+; optionally `libsystemd-dev` / `systemd-libs` with `libssl-dev` / `openssl`, and `libpam0g-dev` / `pam`
-  - macOS: Xcode 14+ / Apple Clang
-- **CMake 3.24+**
-
-### Optional Linux integrations
-
-| CMake option | Needs | Without it |
-|---|---|---|
-| `BROCRED_WITH_SDBUS` (`AUTO`/`ON`/`OFF`, default `AUTO`) | libsystemd >= 246 (sd-bus), and OpenSSL libcrypto for the Secret Service provider's encrypted sessions | `CredentialStore` (Auto) uses the file keystore; `BackendType::System` fails with an explanation; biometrics report `Unknown` (fprintd cannot be asked); `PolkitAgent` and `SecretServiceProvider` report themselves unavailable |
-| `BROCRED_WITH_PAM` (`AUTO`/`ON`/`OFF`, default `AUTO`) | PAM headers + library | `verify_password()` fails with an explanatory error |
-
-`AUTO` uses an integration when its development files are found, `ON` makes a
-missing one a configure error. `brocred::compiled_features()`
-(`brocred/features.h`) reports what a build contains; the runtime APIs
-(`backend_name()`, `get_biometric_capabilities()`) report whether the
-service is actually running.
-
-### Windows (MSVC)
-```powershell
-cmake -B build -S .
+# Windows (Visual Studio 2022)
+cmake -B build
 cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure
-```
 
-### Linux (GCC / Clang)
-```bash
-cmake -B build-release -S . -DCMAKE_BUILD_TYPE=Release
+# macOS (Apple Clang + Ninja)
+cmake -B build-release -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build-release
 ctest --test-dir build-release --output-on-failure
 ```
 
-### macOS (Apple Clang)
-```bash
-cmake -B build-release -S . -DCMAKE_BUILD_TYPE=Release
-cmake --build build-release
-ctest --test-dir build-release --output-on-failure
+### Consuming brocred
+
+Downstream consumers link against `brocred::brocred`:
+
+```cmake
+add_subdirectory(path/to/brocred)
+target_link_libraries(your_target PRIVATE brocred::brocred)
 ```
 
-## Test Harness & Oracles
-- Tests use standard ctest without third-party frameworks (`tests/check.h`).
-- Tests exit with return code `77` when an environment prerequisite (e.g. absent CLI tool or headless environment without biometrics hardware) is honestly not present.
-- Tests that store credentials in the real OS store (Credential Manager, login keychain, Secret Service keyring) delete their items before starting and again on every exit path (RAII). When no Secret Service runs, the Linux tests point the file keystore at a private temporary file instead of `~/.local/share`.
+The standalone Bronze JavaScript binding (`BROCRED_ENABLE_API=ON`, default) builds
+`brocred_api` for the [bronze](https://github.com/wlejon/bronze) runtime. It requires
+`../bronze` and `../brass` beside this repository or `-DBRONZE_DIR=<path>`. Set
+`-DBROCRED_ENABLE_API=OFF` to disable the JavaScript binding.
 
-### Opt-in tests
+## Tests & Test Oracles
 
-A plain `ctest` changes nothing a user would notice beyond those scoped test items:
+All tests use standard ctest without external testing frameworks (`tests/check.h`). When an
+optional OS service or prerequisite tool is absent, tests exit with status `77` (ctest skip)
+and log the reason.
 
-| Variable | Enables |
-|---|---|
-| `BROCRED_TEST_AUTH=1` | Wrong-password attempts against the logged-in account in `test_*_verifier`. They count toward account-lockout policies (Windows 11 locks after 10 by default; `pam_faillock` after 3 on some distributions) and are logged as failed logons. By default only an account that does not exist is tried. |
-| `BROCRED_TEST_TEMP_KEYCHAIN=1` (macOS) | Runs the keychain tests against an unlocked temporary keychain made the default for the test's duration, for sessions whose login keychain is locked (SSH on a build Mac). It rewrites the user's keychain search list while it runs and restores it afterwards; a test killed mid-run leaves the preferences pointing at a deleted keychain. Without it, a locked login keychain makes those tests skip. |
+Tests storing credentials in real OS stores (Credential Manager, Keychain, Secret Service)
+isolate items with unique prefixes and guarantee cleanup before and after each run via RAII.
+When no Secret Service daemon is active, Linux tests run the file keystore against isolated
+temporary paths.
+
+### Opt-In Tests
+
+To protect developer workstations against unintended side-effects, sensitive authentication
+tests require explicit environment variable opt-in:
+
+| Environment Variable | Target Platform | Description & Safety Precautions |
+|---|---|---|
+| `BROCRED_TEST_AUTH=1` | Linux, Windows | Enables wrong-password verification attempts against the currently logged-in account in `test_*_verifier`. Because repeated wrong attempts trigger OS account lockout policies (Windows locks after 10 failed attempts; Linux `pam_faillock` after 3), this test is disabled by default. When omitted, verifier tests run only against accounts known not to exist. |
+| `BROCRED_TEST_TEMP_KEYCHAIN=1` | macOS | Executes keychain tests against an unlocked temporary keychain made the default for the duration of the test. Necessary for headless or SSH CI sessions where the default login keychain is locked. It temporarily modifies the user's keychain search list and restores it upon completion. |
+
+In CI environments, both `BROCRED_TEST_AUTH=1` and `BROCRED_TEST_TEMP_KEYCHAIN=1` are enabled
+on disposable virtual machines.
