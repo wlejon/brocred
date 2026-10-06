@@ -59,6 +59,9 @@ static void test_mac_security_roundtrip() {
 }
 
 int main() {
+    // A temporary keychain is isolated; without one the test writes to the
+    // login keychain.
+    if (!bstest::opted_in("BROCRED_TEST_TEMP_KEYCHAIN")) bstest::require_mutate("test_mac_security_oracle");
     test_mac_security_roundtrip();
     return bstest::finish("test_mac_security_oracle");
 }

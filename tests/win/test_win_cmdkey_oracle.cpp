@@ -87,6 +87,7 @@ static void test_cmdkey_roundtrip() {
 }
 
 int main() {
+    bstest::require_mutate("test_win_cmdkey_oracle");
     test_cmdkey_roundtrip();
     return bstest::finish("test_win_cmdkey_oracle");
 }

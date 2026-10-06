@@ -61,6 +61,7 @@ static void test_wincred_crud() {
 }
 
 int main() {
+    bstest::require_mutate("test_win_credentials");
     test_wincred_crud();
     return bstest::finish("test_win_credentials");
 }

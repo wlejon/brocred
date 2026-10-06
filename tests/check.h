@@ -69,6 +69,17 @@ inline bool opted_in(const char* var) {
 #endif
 }
 
+// Tests that write to the account's real credential store (Windows Credential
+// Manager, the login keychain, the session's Secret Service) run only with
+// BROCRED_TEST_MUTATE=1, and skip with the reason otherwise. Their cleanup
+// guards remove what they store, but a crash or a kill mid-run would leave it
+// in the user's store. CI runners are disposable and set it.
+inline void require_mutate(const char* name) {
+    if (!opted_in("BROCRED_TEST_MUTATE")) {
+        skip(name, "writes to this account's real credential store; set BROCRED_TEST_MUTATE=1 to run it");
+    }
+}
+
 inline bool wait_until(const std::function<bool()>& pred, std::chrono::milliseconds timeout,
                        std::chrono::milliseconds step = std::chrono::milliseconds(10)) {
     auto deadline = std::chrono::steady_clock::now() + timeout;

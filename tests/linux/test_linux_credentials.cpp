@@ -76,6 +76,7 @@ static void test_linux_cred_crud() {
 }
 
 int main() {
+    bstest::require_mutate("test_linux_credentials");
     test_linux_cred_crud();
     return bstest::finish("test_linux_credentials");
 }

@@ -38,6 +38,9 @@ concurrency:
 #                                 unlocked temporary keychain, made the default
 #                                 for the test's duration; a CI session's login
 #                                 keychain is locked.
+#   BROCRED_TEST_MUTATE=1         the credential-store tests write to the
+#                                 account's real store (Credential Manager,
+#                                 the session's Secret Service).
 #
 # On Linux the tests run inside a D-Bus session with gnome-keyring unlocked in
 # it, so the Secret Service backend and the secret-tool oracle are real rather
@@ -46,6 +49,7 @@ concurrency:
 env:
   BROCRED_TEST_AUTH: "1"
   BROCRED_TEST_TEMP_KEYCHAIN: "1"
+  BROCRED_TEST_MUTATE: "1"
   LINUX_PACKAGES: >-
     ninja-build pkg-config libsystemd-dev libpam0g-dev libssl-dev
     dbus-daemon dbus-bin libsecret-tools gnome-keyring

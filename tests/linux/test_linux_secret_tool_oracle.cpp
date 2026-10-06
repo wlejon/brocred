@@ -76,6 +76,7 @@ static void test_secret_tool_roundtrip() {
 }
 
 int main() {
+    bstest::require_mutate("test_linux_secret_tool_oracle");
     test_secret_tool_roundtrip();
     return bstest::finish("test_linux_secret_tool_oracle");
 }
