@@ -1,7 +1,9 @@
 version: 2
 
-# No package manifest to watch: brocred links only the OS (sd-bus and PAM come
-# from the distribution). That leaves the pinned actions in .github/workflows/.
+# No package manifest to watch: brocred links the OS (sd-bus and PAM come from
+# the distribution), and brodbus and bronze are bro_dependency() pins in
+# CMakeLists.txt, moved deliberately (bro's scripts/bump-deps.sh). That leaves
+# the pinned actions in .github/workflows/.
 updates:
   - package-ecosystem: github-actions
     directory: /

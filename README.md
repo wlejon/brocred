@@ -91,21 +91,12 @@ brocred requires CMake 3.24+ and a C++20 compiler.
 
 ### Dependency Resolution (brodbus)
 
-On Linux, `brocred` locates the `brodbus` library following the ecosystem dependency convention:
-1. **Existing target:** Uses `brodbus::brodbus` if already defined by a parent build.
-2. **Sibling checkout (development default):** Located at `../brodbus` beside this repository (or `-DBRODBUS_DIR=<path>`).
-3. **Submodule layout (isolated / CI builds):** Embedded in `third_party/brodbus`.
-
-```bash
-# Sibling layout:
-git clone https://github.com/wlejon/brocred
-git clone https://github.com/wlejon/brodbus   # Sibling directory
-
-# Submodule layout:
-git clone --recursive https://github.com/wlejon/brocred
-# or:
-git submodule update --init --recursive
-```
+On Linux with sd-bus, `brocred` needs the `brodbus` library. There are no submodules:
+brodbus (and bronze, for the JavaScript binding) is a `bro_dependency()` pin in
+`CMakeLists.txt`, resolved through `cmake/bro_deps.cmake` in this order:
+1. **Existing target:** Uses `brodbus` if already defined by a parent build.
+2. **Working tree:** `../brodbus` beside the top-level project (or `-DFETCHCONTENT_SOURCE_DIR_BRODBUS=<path>`).
+3. **Pinned commit:** fetched from GitHub at configure, so a plain `git clone` builds.
 
 ### Standalone Build
 
@@ -136,10 +127,10 @@ add_subdirectory(path/to/brocred)
 target_link_libraries(your_target PRIVATE brocred::brocred)
 ```
 
-The standalone Bronze JavaScript binding (`BROCRED_ENABLE_API=ON`, default) builds
-`brocred_api` for the [bronze](https://github.com/wlejon/bronze) runtime. It requires
-`../bronze` and `../brass` beside this repository or `-DBRONZE_DIR=<path>`. Set
-`-DBROCRED_ENABLE_API=OFF` to disable the JavaScript binding.
+The standalone Bronze JavaScript binding (`BROCRED_ENABLE_API`, on when brocred is the
+top-level project) builds `brocred_api` for the [bronze](https://github.com/wlejon/bronze)
+runtime. bronze (with brass) resolves like brodbus: `../bronze` beside the top-level project,
+else the pinned commit. Set `-DBROCRED_ENABLE_API=OFF` to disable the JavaScript binding.
 
 ## Tests & Test Oracles
 
