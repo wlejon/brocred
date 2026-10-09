@@ -100,7 +100,7 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     if(BROCRED_HAVE_SDBUS)
         # brodbus, the sd-bus layer: an outer project's target, else ../brodbus
         # beside the top-level project, else the pinned commit, fetched at configure.
-        bro_dependency(brodbus GITHUB wlejon/brodbus REF 714ded627aed1c0db4b046d143bcc29e1ec9e9cf OPTIONS BRODBUS_BUILD_TESTS=OFF)
+        bro_dependency(brodbus GITHUB wlejon/brodbus OPTIONS BRODBUS_BUILD_TESTS=OFF)
 
         find_package(OpenSSL REQUIRED)
         file(GLOB _dbus_sources CONFIGURE_DEPENDS src/linux/dbus/*.cpp)
@@ -175,7 +175,7 @@ if(BROCRED_ENABLE_API)
     # bronze (with brass, its code generator) through cmake/bro_deps.cmake: an
     # outer project's target, else ../bronze beside the top-level project, else
     # the pinned commit, fetched at configure.
-    bro_dependency(bronze GITHUB wlejon/bronze REF 15ce4cf5fc25d8afe03882985ae95adcba46a6a9 TARGET bronze_runtime_shared
+    bro_dependency(bronze GITHUB wlejon/bronze TARGET bronze_runtime_shared
                    OPTIONS BRONZE_BUILD_SHARED_RUNTIME=ON BRONZE_BUILD_TESTS=OFF)
 
     add_subdirectory(src/api)
