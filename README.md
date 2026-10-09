@@ -130,7 +130,7 @@ target_link_libraries(your_target PRIVATE brocred::brocred)
 The standalone Bronze JavaScript binding (`BROCRED_ENABLE_API`, on when brocred is the
 top-level project) builds `brocred_api` for the [bronze](https://github.com/wlejon/bronze)
 runtime. bronze (with brass) resolves like brodbus: `../bronze` beside the top-level project,
-else the pinned commit. Set `-DBROCRED_ENABLE_API=OFF` to disable the JavaScript binding.
+else the head of its main branch. Set `-DBROCRED_ENABLE_API=OFF` to disable the JavaScript binding.
 
 ## Tests & Test Oracles
 
