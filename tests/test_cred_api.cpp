@@ -350,16 +350,32 @@ int main() {
     // 7. Test PolicyKit Agent callbacks & request dispatch
     std::cout << "Testing bro.cred PolicyKit Agent..." << std::endl;
     {
+        // 7a. Dispatch request BEFORE onPolkitRequest is registered and call tickCredAsync();
+        // request must NOT be dropped and must arrive once onPolkitRequest is registered.
+        auto preDispatchRes = evalScript(
+            "globalThis._preReq = bro.cred.dispatchPolkitRequest({\n"
+            "  actionId: 'org.freedesktop.policykit.pre',\n"
+            "  message: 'Queued before callback',\n"
+            "  cookie: 'pre-cookie-001'\n"
+            "});\n"
+        );
+        CHECK(!preDispatchRes.thrown && ev::isObject(preDispatchRes.value));
+        brocred::api::tickCredAsync();
+
         std::string polkitScript =
             "(function() {\n"
-            "  globalThis._polkitReceived = null;\n"
+            "  globalThis._polkitReceived = [];\n"
             "  const subHandle = bro.cred.onPolkitRequest(req => {\n"
-            "    globalThis._polkitReceived = {\n"
+            "    globalThis._polkitReceived.push({\n"
             "      actionId: req.actionId,\n"
             "      message: req.message,\n"
             "      cookie: req.cookie\n"
-            "    };\n"
-            "    req.submitResponse(true);\n"
+            "    });\n"
+            "    if (req.cookie === 'pre-cookie-001') {\n"
+            "      bro.cred.submitResponse(req.cookie, { success: true });\n"
+            "    } else {\n"
+            "      req.submitResponse(true);\n"
+            "    }\n"
             "  });\n"
             "  if (typeof subHandle !== 'object' || typeof subHandle.cancel !== 'function') return false;\n"
             "  return true;\n"
@@ -367,7 +383,7 @@ int main() {
         auto r = evalScript(polkitScript);
         CHECK(!r.thrown && ev::isBool(r.value) && ev::toBool(r.value));
 
-        // Dispatch a test polkit request directly
+        // Dispatch a second test polkit request directly
         auto dispatchRes = evalScript(
             "bro.cred.dispatchPolkitRequest({\n"
             "  actionId: 'org.freedesktop.policykit.exec',\n"
@@ -378,28 +394,52 @@ int main() {
         CHECK(!dispatchRes.thrown && ev::isObject(dispatchRes.value));
 
         bool finished = pumpUntil([]() {
-            auto v = evalScript("globalThis._polkitReceived !== null;");
+            auto v = evalScript("globalThis._polkitReceived.length === 2;");
             return !v.thrown && ev::isBool(v.value) && ev::toBool(v.value);
         });
-        CHECK_MSG(finished, "onPolkitRequest callback not received");
+        CHECK_MSG(finished, "onPolkitRequest callbacks not received");
 
         auto checkPolkit = evalScript(
             "(function() {\n"
-            "  const r = globalThis._polkitReceived;\n"
-            "  if (!r) return false;\n"
-            "  if (r.actionId !== 'org.freedesktop.policykit.exec') return false;\n"
-            "  if (r.cookie !== 'test-cookie-1234') return false;\n"
+            "  const list = globalThis._polkitReceived;\n"
+            "  if (!Array.isArray(list) || list.length !== 2) return false;\n"
+            "  if (list[0].cookie !== 'pre-cookie-001') return false;\n"
+            "  if (list[1].actionId !== 'org.freedesktop.policykit.exec') return false;\n"
+            "  if (list[1].cookie !== 'test-cookie-1234') return false;\n"
+            "  const st = globalThis._preReq.getStatus();\n"
+            "  if (!st.answered || !st.success || st.cancelled) return false;\n"
             "  return true;\n"
             "})()\n"
         );
         CHECK(!checkPolkit.thrown && ev::isBool(checkPolkit.value) && ev::toBool(checkPolkit.value));
 
-        // Test register / unregister agent methods
+        // Test register / unregister agent methods with an active unanswered request
         auto regRes = evalScript("bro.cred.registerPolkitAgent({ registerWithAuthority: false });");
         CHECK(!regRes.thrown && ev::isBool(regRes.value));
 
+        auto pendingRes = evalScript(
+            "globalThis._pendingReq = bro.cred.dispatchPolkitRequest({\n"
+            "  actionId: 'org.freedesktop.policykit.pending',\n"
+            "  message: 'Pending during unregister',\n"
+            "  cookie: 'pending-cookie-999'\n"
+            "});\n"
+        );
+        CHECK(!pendingRes.thrown && ev::isObject(pendingRes.value));
+
+        auto t0 = std::chrono::steady_clock::now();
         auto unregRes = evalScript("bro.cred.unregisterPolkitAgent();");
+        auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - t0).count();
         CHECK(!unregRes.thrown && ev::isBool(unregRes.value) && ev::toBool(unregRes.value));
+        CHECK_MSG(elapsedMs < 2000, "unregisterPolkitAgent stalled with active request");
+
+        auto checkPendingCancelled = evalScript(
+            "(function() {\n"
+            "  const st = globalThis._pendingReq.getStatus();\n"
+            "  return st.answered === true && st.cancelled === true && st.success === false;\n"
+            "})()\n"
+        );
+        CHECK(!checkPendingCancelled.thrown && ev::isBool(checkPendingCancelled.value) && ev::toBool(checkPendingCancelled.value));
 
         std::cout << "  PolicyKit Agent [PASS]" << std::endl;
     }

@@ -61,6 +61,60 @@ brocred::PolkitAuthResponse handleIncomingPolkitRequest(const brocred::PolkitAut
     return qReq->response;
 }
 
+brocred::PolkitAuthResponse parsePolkitResponse(Value val, const brocred::PolkitAuthRequest& req) {
+    ev::Persistent p0(val);
+    brocred::PolkitIdentity defaultId = req.identities.empty()
+        ? brocred::PolkitIdentity::current_user()
+        : req.identities[0];
+
+    if (ev::isBool(p0.get())) {
+        if (ev::toBool(p0.get())) {
+            return brocred::PolkitAuthResponse::ok(defaultId);
+        }
+        return brocred::PolkitAuthResponse::cancel("Cancelled by user prompt");
+    }
+    if (ev::isObject(p0.get())) {
+        ev::Persistent pSuccess(ev::getProperty(p0.get(), "success"));
+        ev::Persistent pCancelled(ev::getProperty(p0.get(), "cancelled"));
+        ev::Persistent pError(ev::getProperty(p0.get(), "error"));
+        ev::Persistent pIdentity(ev::getProperty(p0.get(), "identity"));
+
+        bool success = ev::isBool(pSuccess.get()) && ev::toBool(pSuccess.get());
+        bool cancelled = ev::isBool(pCancelled.get()) && ev::toBool(pCancelled.get());
+        std::string err = ev::isString(pError.get()) ? ev::toUtf8(pError.get()) : "";
+
+        brocred::PolkitIdentity chosenId = defaultId;
+        if (ev::isString(pIdentity.get())) {
+            chosenId.name = ev::toUtf8(pIdentity.get());
+        } else if (ev::isObject(pIdentity.get())) {
+            ev::Persistent pKind(ev::getProperty(pIdentity.get(), "kind"));
+            ev::Persistent pIdNum(ev::getProperty(pIdentity.get(), "id"));
+            ev::Persistent pName(ev::getProperty(pIdentity.get(), "name"));
+            if (ev::isString(pKind.get())) {
+                std::string k = ev::toUtf8(pKind.get());
+                chosenId.kind = (k == "group" || k == "unix-group")
+                    ? brocred::PolkitIdentity::Kind::UnixGroup
+                    : brocred::PolkitIdentity::Kind::UnixUser;
+            }
+            if (ev::isNumber(pIdNum.get())) {
+                chosenId.id = static_cast<uint32_t>(ev::toDouble(pIdNum.get()));
+            }
+            if (ev::isString(pName.get())) {
+                chosenId.name = ev::toUtf8(pName.get());
+            }
+        }
+
+        if (cancelled) {
+            return brocred::PolkitAuthResponse::cancel(err.empty() ? "Cancelled by user" : err);
+        }
+        if (success) {
+            return brocred::PolkitAuthResponse::ok(chosenId);
+        }
+        return brocred::PolkitAuthResponse::fail(err.empty() ? "Authentication failed" : err);
+    }
+    return brocred::PolkitAuthResponse::cancel("Invalid response format");
+}
+
 Value buildRequestHandle(std::shared_ptr<PolkitQueuedRequest> req) {
     ObjectBuilder b;
     b.set("actionId", req->request.action_id);
@@ -89,40 +143,8 @@ Value buildRequestHandle(std::shared_ptr<PolkitQueuedRequest> req) {
 
     // req.submitResponse(response)
     b.def("submitResponse", 1, [req](Value, std::span<const Value> args) -> Value {
-        ev::Persistent p0(args.size() > 0 ? args[0] : ev::undefined());
-
-        brocred::PolkitAuthResponse resp;
-        if (ev::isBool(p0.get())) {
-            if (ev::toBool(p0.get())) {
-                brocred::PolkitIdentity id = req->request.identities.empty()
-                    ? brocred::PolkitIdentity::current_user()
-                    : req->request.identities[0];
-                resp = brocred::PolkitAuthResponse::ok(id);
-            } else {
-                resp = brocred::PolkitAuthResponse::cancel("Cancelled by user prompt");
-            }
-        } else if (ev::isObject(p0.get())) {
-            ev::Persistent pSuccess(ev::getProperty(p0.get(), "success"));
-            ev::Persistent pCancelled(ev::getProperty(p0.get(), "cancelled"));
-            ev::Persistent pError(ev::getProperty(p0.get(), "error"));
-
-            bool success = ev::isBool(pSuccess.get()) && ev::toBool(pSuccess.get());
-            bool cancelled = ev::isBool(pCancelled.get()) && ev::toBool(pCancelled.get());
-            std::string err = ev::isString(pError.get()) ? ev::toUtf8(pError.get()) : "";
-
-            if (cancelled) {
-                resp = brocred::PolkitAuthResponse::cancel(err.empty() ? "Cancelled by user" : err);
-            } else if (success) {
-                brocred::PolkitIdentity id = req->request.identities.empty()
-                    ? brocred::PolkitIdentity::current_user()
-                    : req->request.identities[0];
-                resp = brocred::PolkitAuthResponse::ok(id);
-            } else {
-                resp = brocred::PolkitAuthResponse::fail(err.empty() ? "Authentication failed" : err);
-            }
-        } else {
-            resp = brocred::PolkitAuthResponse::cancel("Invalid response format");
-        }
+        brocred::PolkitAuthResponse resp = parsePolkitResponse(
+            args.size() > 0 ? args[0] : ev::undefined(), req->request);
 
         {
             std::lock_guard lock(req->mu);
@@ -147,6 +169,17 @@ Value buildRequestHandle(std::shared_ptr<PolkitQueuedRequest> req) {
         return ev::fromBool(true);
     });
 
+    // req.getStatus() -> { answered, success, cancelled, error }
+    b.def("getStatus", 0, [req](Value, std::span<const Value>) -> Value {
+        std::lock_guard lock(req->mu);
+        ObjectBuilder st;
+        st.set("answered", req->answered);
+        st.set("success", req->response.success);
+        st.set("cancelled", req->response.cancelled);
+        st.set("error", req->response.error_message);
+        return st.get();
+    });
+
     return b.get();
 }
 
@@ -157,16 +190,14 @@ void drainPolkit() {
     ev::Persistent callbackCopy;
     {
         std::lock_guard lock(g_polkitMu);
-        toDispatch.swap(g_unhandledPolkitRequests);
-        if (g_polkitCallback) {
+        if (g_polkitCallback && !g_polkitCallback->get().isUndefined() &&
+            ev::isFunction(g_polkitCallback->get())) {
             callbackCopy.set(g_polkitCallback->get());
-        }
-        if (g_polkitAgent && g_polkitAgent->is_running()) {
-            g_polkitAgent->process_one(0);
+            toDispatch.swap(g_unhandledPolkitRequests);
         }
     }
 
-    if (!toDispatch.empty() && !callbackCopy.get().isUndefined() && ev::isFunction(callbackCopy.get())) {
+    if (!toDispatch.empty()) {
         for (auto& req : toDispatch) {
             ev::Persistent handleObj(buildRequestHandle(req));
             const Value arg = handleObj.get();
@@ -176,24 +207,28 @@ void drainPolkit() {
 }
 
 void shutdownPolkit() {
+    std::unique_ptr<brocred::PolkitAgent> agent;
     std::vector<std::shared_ptr<PolkitQueuedRequest>> toCancel;
     {
         std::lock_guard lock(g_polkitMu);
-        if (g_polkitAgent) {
-            g_polkitAgent->unregister_with_authority();
-            g_polkitAgent->stop();
-            g_polkitAgent.reset();
-        }
+        agent = std::move(g_polkitAgent);
         toCancel.swap(g_activePolkitRequests);
         g_unhandledPolkitRequests.clear();
         g_polkitCallback.reset();
     }
 
     for (auto& req : toCancel) {
-        std::lock_guard lock(req->mu);
-        req->response = brocred::PolkitAuthResponse::cancel("PolicyKit agent shutting down");
-        req->answered = true;
+        {
+            std::lock_guard lock(req->mu);
+            req->response = brocred::PolkitAuthResponse::cancel("PolicyKit agent shutting down");
+            req->answered = true;
+        }
         req->cv.notify_all();
+    }
+
+    if (agent) {
+        agent->unregister_with_authority();
+        agent->stop();
     }
 }
 
@@ -245,11 +280,26 @@ void installPolkitOnto(Value credObj) {
 
     // bro.cred.unregisterPolkitAgent() -> boolean
     cred.def("unregisterPolkitAgent", 0, [](Value, std::span<const Value>) -> Value {
-        std::lock_guard lock(g_polkitMu);
-        if (!g_polkitAgent) return ev::fromBool(true);
-        g_polkitAgent->unregister_with_authority();
-        g_polkitAgent->stop();
-        g_polkitAgent.reset();
+        std::unique_ptr<brocred::PolkitAgent> agent;
+        std::vector<std::shared_ptr<PolkitQueuedRequest>> toCancel;
+        {
+            std::lock_guard lock(g_polkitMu);
+            agent = std::move(g_polkitAgent);
+            toCancel.swap(g_activePolkitRequests);
+            g_unhandledPolkitRequests.clear();
+        }
+        for (auto& req : toCancel) {
+            {
+                std::lock_guard lock(req->mu);
+                req->response = brocred::PolkitAuthResponse::cancel("PolicyKit agent unregistered");
+                req->answered = true;
+            }
+            req->cv.notify_all();
+        }
+        if (agent) {
+            agent->unregister_with_authority();
+            agent->stop();
+        }
         return ev::fromBool(true);
     });
 
@@ -308,16 +358,7 @@ void installPolkitOnto(Value credObj) {
         }
         if (!found) return ev::fromBool(false);
 
-        brocred::PolkitAuthResponse resp;
-        if (ev::isBool(p1.get())) {
-            resp = ev::toBool(p1.get())
-                ? brocred::PolkitAuthResponse::ok(found->request.identities.empty()
-                    ? brocred::PolkitIdentity::current_user()
-                    : found->request.identities[0])
-                : brocred::PolkitAuthResponse::cancel("Cancelled by user prompt");
-        } else {
-            resp = brocred::PolkitAuthResponse::cancel("Cancelled");
-        }
+        brocred::PolkitAuthResponse resp = parsePolkitResponse(p1.get(), found->request);
 
         {
             std::lock_guard lock(found->mu);
