@@ -1,6 +1,5 @@
 add_library(brocred_api STATIC
     api.cpp
-    host_class.cpp
     native_auth.cpp
     native_biometrics.cpp
     native_secrets.cpp
